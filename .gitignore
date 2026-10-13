@@ -1,6 +1,7 @@
-touch node_modules/
+
+node_modules/
 dist/
+coverage/
 .env
 .env.*
 !.env.example
-coverage/
