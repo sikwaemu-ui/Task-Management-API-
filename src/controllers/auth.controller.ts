@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { RegisterInput, LoginInput } from "../schemas/auth.schema";
 import * as authService from "../services/auth.service";
+import { UnauthorizedError } from "../utils/errors";
 
 export const register = async (
   req: Request<{}, {}, RegisterInput>,
@@ -34,6 +35,30 @@ export const login = async (
       success: true,
       message: "Login successful",
       data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getMe = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError("Authentication required");
+    }
+
+    const user = await authService.getUserProfile(req.user.id);
+
+    res.status(200).json({
+      success: true,
+      message: "User profile retrieved successfully",
+      data: {
+        user,
+      },
     });
   } catch (error) {
     next(error);

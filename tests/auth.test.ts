@@ -642,4 +642,291 @@ describe("Auth Feature End-to-End Test Suite", () => {
       });
     });
   });
+
+  describe("Authentication Middleware & GET /api/auth/me", () => {
+    it("returns HTTP 200 with current public profile when a valid token is provided", async () => {
+      const originalFindUnique = prisma.user.findUnique;
+      const testSecret = process.env.JWT_SECRET || "test-jwt-secret-key-min-32-characters-taskflow";
+      const token = jwt.sign(
+        { sub: "42", email: "profile@example.com", role: Role.USER },
+        testSecret,
+        { expiresIn: "1h" }
+      );
+
+      try {
+        prisma.user.findUnique = (async (args: any) => {
+          assert.equal(args.where.id, 42);
+          return {
+            id: 42,
+            email: "profile@example.com",
+            role: Role.USER,
+            createdAt: new Date("2026-10-10T12:00:00.000Z"),
+          };
+        }) as any;
+
+        const res = await fetch(`${baseUrl}/api/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const body = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(body.success, true);
+        assert.equal(body.message, "User profile retrieved successfully");
+        assert.deepEqual(body.data.user, {
+          id: 42,
+          email: "profile@example.com",
+          role: "USER",
+          createdAt: "2026-10-10T12:00:00.000Z",
+        });
+
+        // Verify password and hash are NEVER returned
+        assert.equal(body.data.user.password, undefined);
+        assert.equal(body.data.user.passwordHash, undefined);
+      } finally {
+        prisma.user.findUnique = originalFindUnique;
+      }
+    });
+
+    it("accepts lowercase 'bearer' scheme case-insensitively", async () => {
+      const originalFindUnique = prisma.user.findUnique;
+      const testSecret = process.env.JWT_SECRET || "test-jwt-secret-key-min-32-characters-taskflow";
+      const token = jwt.sign(
+        { sub: "42", email: "profile@example.com", role: Role.USER },
+        testSecret,
+        { expiresIn: "1h" }
+      );
+
+      try {
+        prisma.user.findUnique = (async () => ({
+          id: 42,
+          email: "profile@example.com",
+          role: Role.USER,
+          createdAt: new Date("2026-10-10T12:00:00.000Z"),
+        })) as any;
+
+        const res = await fetch(`${baseUrl}/api/auth/me`, {
+          headers: {
+            Authorization: `bearer ${token}`,
+          },
+        });
+
+        assert.equal(res.status, 200);
+      } finally {
+        prisma.user.findUnique = originalFindUnique;
+      }
+    });
+
+    it("reads current database role rather than trusting role claim in token", async () => {
+      const originalFindUnique = prisma.user.findUnique;
+      const testSecret = process.env.JWT_SECRET || "test-jwt-secret-key-min-32-characters-taskflow";
+      // Token says USER, but database has been updated to ADMIN
+      const token = jwt.sign(
+        { sub: "42", email: "profile@example.com", role: Role.USER },
+        testSecret,
+        { expiresIn: "1h" }
+      );
+
+      try {
+        prisma.user.findUnique = (async () => ({
+          id: 42,
+          email: "profile@example.com",
+          role: Role.ADMIN,
+          createdAt: new Date("2026-10-10T12:00:00.000Z"),
+        })) as any;
+
+        const res = await fetch(`${baseUrl}/api/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const body = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(body.data.user.role, "ADMIN");
+      } finally {
+        prisma.user.findUnique = originalFindUnique;
+      }
+    });
+
+    it("returns HTTP 401 when Authorization header is missing", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/me`);
+      const body = await res.json();
+
+      assert.equal(res.status, 401);
+      assert.equal(body.success, false);
+      assert.equal(body.message, "Authentication required");
+    });
+
+    it("returns HTTP 401 for unsupported authorization scheme (e.g. Basic)", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: {
+          Authorization: "Basic dXNlcjpwYXNz",
+        },
+      });
+
+      const body = await res.json();
+      assert.equal(res.status, 401);
+      assert.equal(body.success, false);
+    });
+
+    it("returns HTTP 401 for malformed bearer header", async () => {
+      let res = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: {
+          Authorization: "Bearer",
+        },
+      });
+      assert.equal(res.status, 401);
+
+      res = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: {
+          Authorization: "Bearer token extra-part",
+        },
+      });
+      assert.equal(res.status, 401);
+
+      res = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: {
+          Authorization: "Bearer   ",
+        },
+      });
+      assert.equal(res.status, 401);
+    });
+
+    it("returns HTTP 401 for malformed or corrupted JWT token", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: {
+          Authorization: "Bearer not.a.valid.jwt",
+        },
+      });
+
+      const body = await res.json();
+      assert.equal(res.status, 401);
+      assert.equal(body.success, false);
+      assert.equal(body.message, "Invalid or expired token");
+    });
+
+    it("returns HTTP 401 for token signed with the wrong secret", async () => {
+      const wrongSecretToken = jwt.sign(
+        { sub: "42", email: "user@example.com", role: Role.USER },
+        "completely-different-wrong-secret-key-1234567890",
+        { expiresIn: "1h" }
+      );
+
+      const res = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${wrongSecretToken}`,
+        },
+      });
+
+      const body = await res.json();
+      assert.equal(res.status, 401);
+      assert.equal(body.success, false);
+      assert.equal(body.message, "Invalid or expired token");
+    });
+
+    it("returns HTTP 401 for expired token", async () => {
+      const testSecret = process.env.JWT_SECRET || "test-jwt-secret-key-min-32-characters-taskflow";
+      const expiredToken = jwt.sign(
+        { sub: "42", email: "user@example.com", role: Role.USER },
+        testSecret,
+        { expiresIn: "-5s" }
+      );
+
+      const res = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${expiredToken}`,
+        },
+      });
+
+      const body = await res.json();
+      assert.equal(res.status, 401);
+      assert.equal(body.success, false);
+      assert.equal(body.message, "Invalid or expired token");
+    });
+
+    it("returns HTTP 401 for token with missing or invalid subject claim", async () => {
+      const testSecret = process.env.JWT_SECRET || "test-jwt-secret-key-min-32-characters-taskflow";
+
+      // Missing sub
+      const missingSubToken = jwt.sign(
+        { email: "user@example.com", role: Role.USER },
+        testSecret,
+        { expiresIn: "1h" }
+      );
+      let res = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${missingSubToken}` },
+      });
+      assert.equal(res.status, 401);
+
+      // Non-integer sub
+      const nonIntSubToken = jwt.sign(
+        { sub: "not-a-number", email: "user@example.com", role: Role.USER },
+        testSecret,
+        { expiresIn: "1h" }
+      );
+      res = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${nonIntSubToken}` },
+      });
+      assert.equal(res.status, 401);
+
+      // Negative sub
+      const negativeSubToken = jwt.sign(
+        { sub: "-1", email: "user@example.com", role: Role.USER },
+        testSecret,
+        { expiresIn: "1h" }
+      );
+      res = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${negativeSubToken}` },
+      });
+      assert.equal(res.status, 401);
+    });
+
+    it("returns HTTP 401 for token with invalid role claim", async () => {
+      const testSecret = process.env.JWT_SECRET || "test-jwt-secret-key-min-32-characters-taskflow";
+      const invalidRoleToken = jwt.sign(
+        { sub: "42", email: "user@example.com", role: "SUPERUSER" },
+        testSecret,
+        { expiresIn: "1h" }
+      );
+
+      const res = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${invalidRoleToken}`,
+        },
+      });
+
+      const body = await res.json();
+      assert.equal(res.status, 401);
+      assert.equal(body.success, false);
+    });
+
+    it("returns HTTP 401 when token is valid but user no longer exists in database", async () => {
+      const originalFindUnique = prisma.user.findUnique;
+      const testSecret = process.env.JWT_SECRET || "test-jwt-secret-key-min-32-characters-taskflow";
+      const token = jwt.sign(
+        { sub: "999", email: "deleted@example.com", role: Role.USER },
+        testSecret,
+        { expiresIn: "1h" }
+      );
+
+      try {
+        prisma.user.findUnique = (async () => null) as any;
+
+        const res = await fetch(`${baseUrl}/api/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const body = await res.json();
+        assert.equal(res.status, 401);
+        assert.equal(body.success, false);
+        assert.equal(body.message, "User account no longer exists");
+      } finally {
+        prisma.user.findUnique = originalFindUnique;
+      }
+    });
+  });
 });

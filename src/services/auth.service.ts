@@ -28,6 +28,13 @@ export interface LoginResponse {
   };
 }
 
+export interface UserProfile {
+  id: number;
+  email: string;
+  role: Role;
+  createdAt: Date;
+}
+
 export const registerUser = async (
   input: RegisterInput
 ): Promise<RegisteredUser> => {
@@ -113,4 +120,22 @@ export const loginUser = async (input: LoginInput): Promise<LoginResponse> => {
       role: user.role,
     },
   };
+};
+
+export const getUserProfile = async (userId: number): Promise<UserProfile> => {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      createdAt: true,
+    },
+  });
+
+  if (!user) {
+    throw new UnauthorizedError("User account no longer exists");
+  }
+
+  return user;
 };
