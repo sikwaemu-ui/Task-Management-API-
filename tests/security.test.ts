@@ -70,15 +70,19 @@ describe("production security and reliability controls", () => {
       JWT_SECRET: "this-is-a-test-secret-with-at-least-32-characters",
       AUTH_RATE_LIMIT_MAX: "2",
       AUTH_RATE_LIMIT_WINDOW_MS: "60000",
-      API_RATE_LIMIT_MAX: "2",
+      API_RATE_LIMIT_MAX: "4",
       CORS_ORIGINS: "https://frontend.example.test",
     });
     const { authLimiter, apiLimiter } = createRateLimiters(config);
     const limiterApp = express();
-    limiterApp.use("/api", apiLimiter);
-    limiterApp.post("/login", authLimiter, (_req, res) => res.json({ success: true }));
-    limiterApp.post("/register", authLimiter, (_req, res) => res.json({ success: true }));
+
+    // Match the production middleware order: the exact health route completes
+    // before the general /api limiter; all following API routes remain limited.
     limiterApp.get("/api/health", (_req, res) => res.json({ success: true }));
+    limiterApp.use("/api", apiLimiter);
+    limiterApp.post("/api/auth/login", authLimiter, (_req, res) => res.json({ success: true }));
+    limiterApp.post("/api/auth/register", authLimiter, (_req, res) => res.json({ success: true }));
+    limiterApp.get("/api/tasks", (_req, res) => res.json({ success: true }));
     const limiterServer = http.createServer(limiterApp);
     await new Promise<void>((resolve) => limiterServer.listen(0, "127.0.0.1", resolve));
     const address = limiterServer.address();
@@ -86,9 +90,9 @@ describe("production security and reliability controls", () => {
     const url = `http://127.0.0.1:${address.port}`;
 
     try {
-      assert.equal((await fetch(`${url}/login`, { method: "POST" })).status, 200);
-      assert.equal((await fetch(`${url}/register`, { method: "POST" })).status, 200);
-      const limited = await fetch(`${url}/login`, { method: "POST" });
+      assert.equal((await fetch(`${url}/api/auth/login`, { method: "POST" })).status, 200);
+      assert.equal((await fetch(`${url}/api/auth/register`, { method: "POST" })).status, 200);
+      const limited = await fetch(`${url}/api/auth/login`, { method: "POST" });
       assert.equal(limited.status, 429);
       assert.deepEqual(await limited.json(), {
         success: false,
@@ -96,10 +100,17 @@ describe("production security and reliability controls", () => {
       });
       assert.ok(limited.headers.has("ratelimit"));
 
-      assert.equal((await fetch(`${url}/api/health`)).status, 200);
-      assert.equal((await fetch(`${url}/api/health`)).status, 200);
-      const apiLimited = await fetch(`${url}/api/health`);
+      assert.equal((await fetch(`${url}/api/tasks`)).status, 200);
+      const apiLimited = await fetch(`${url}/api/tasks`);
       assert.equal(apiLimited.status, 429);
+      assert.deepEqual(await apiLimited.json(), {
+        success: false,
+        message: "Too many requests. Please try again later.",
+      });
+
+      const healthAfterQuota = await fetch(`${url}/api/health`);
+      assert.equal(healthAfterQuota.status, 200);
+      assert.deepEqual(await healthAfterQuota.json(), { success: true });
     } finally {
       await new Promise<void>((resolve, reject) => {
         limiterServer.close((error) => (error ? reject(error) : resolve()));

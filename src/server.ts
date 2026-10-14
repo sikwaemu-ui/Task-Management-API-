@@ -31,6 +31,15 @@ app.use(createCorsMiddleware(runtimeConfig));
 app.use(express.json());
 
 const { apiLimiter, authLimiter } = createRateLimiters(runtimeConfig);
+
+// Keep the Render liveness check reachable even when the general API quota is exhausted.
+app.get("/api/health", (_req, res) => {
+  res.json({
+    success: true,
+    message: "Task Managing API is running",
+  });
+});
+
 app.use("/api", apiLimiter);
 app.use("/api/auth/register", authLimiter);
 app.use("/api/auth/login", authLimiter);
@@ -49,13 +58,6 @@ app.use(
     },
   })
 );
-
-app.get("/api/health", (_req, res) => {
-  res.json({
-    success: true,
-    message: "Task Managing API is running",
-  });
-});
 
 app.use("/api/auth", authRoutes);
 app.use("/api/tasks", taskRoutes);
