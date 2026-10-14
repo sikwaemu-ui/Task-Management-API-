@@ -11,6 +11,12 @@ enum Role {
   ADMIN
 }
 
+enum TeamRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
 enum TaskStatus {
   TODO
   IN_PROGRESS
@@ -49,6 +55,7 @@ model TeamMember {
   id        Int      @id @default(autoincrement())
   userId    Int
   teamId    Int
+  role      TeamRole @default(MEMBER)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
