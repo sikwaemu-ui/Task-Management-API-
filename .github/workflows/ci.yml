@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Validate, test, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: taskflow_test
+          POSTGRES_USER: taskflow_ci
+          POSTGRES_PASSWORD: taskflow_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U taskflow_ci -d taskflow_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          # Used only if the Prisma CLI reads prisma.config.ts during install.
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/taskflow?sslmode=disable
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/taskflow?sslmode=disable
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+        env:
+          # Schema validation reads the Prisma 7 datasource URL, but needs no server.
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/taskflow?sslmode=disable
+
+      - name: Apply migrations to the temporary test database
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://taskflow_ci:taskflow_ci@127.0.0.1:5432/taskflow_test?sslmode=disable
+
+      - name: Run tests
+        run: npm test
+        env:
+          DATABASE_URL: postgresql://taskflow_ci:taskflow_ci@127.0.0.1:5432/taskflow_test?sslmode=disable
+
+      - name: Build TypeScript application
+        run: npm run build
