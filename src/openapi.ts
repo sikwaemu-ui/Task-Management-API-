@@ -41,7 +41,7 @@ export const openApiSpec = {
     title: "TaskFlow API",
     version: "1.0.0",
     description:
-      "Task management API with JWT authentication, personal tasks, collaborative team tasks, and role-based team management. Dates are ISO 8601 strings. Register and login are public; use the returned JWT with the Authorize button for protected routes.",
+      "Task management API with JWT authentication, personal tasks, collaborative team tasks, and role-based team management. Dates are ISO 8601 strings. Register and login are public; use the returned JWT with the Authorize button for protected routes. API requests are rate limited and return a safe 429 response when limits are exceeded. Requests from unconfigured browser origins are rejected with 403; CORS does not replace authentication.",
   },
   servers: [{ url: "/", description: "Current server" }],
   tags: [
