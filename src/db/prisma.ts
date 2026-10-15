@@ -31,20 +31,20 @@ function createPrismaClient(): PrismaClient {
     });
 
     pool.on("error", (err) => {
-      console.error(
-        "[PostgreSQL Pool Error]: Unexpected error on idle client:",
-        err.message
-      );
+      console.error(JSON.stringify({
+        level: "error",
+        event: "postgres_pool_error",
+        error: err.name,
+      }));
     });
 
     globalForPrisma.pgPool = pool;
 
     const adapter = new PrismaPg(pool);
     return new PrismaClient({ adapter });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+  } catch {
     throw new Error(
-      `PrismaClient initialization failed with PostgreSQL driver adapter: ${message}`
+      "PrismaClient initialization failed with PostgreSQL driver adapter. Check DATABASE_URL configuration."
     );
   }
 }

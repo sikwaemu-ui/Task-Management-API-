@@ -7,7 +7,7 @@
     "dev": "nodemon --exec tsx src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "NODE_ENV=test tsx --test tests/auth.test.ts tests/task.test.ts tests/team.test.ts tests/team-task.test.ts tests/openapi.test.ts",
+    "test": "NODE_ENV=test tsx --test tests/auth.test.ts tests/task.test.ts tests/team.test.ts tests/team-task.test.ts tests/openapi.test.ts tests/security.test.ts",
     "postinstall": "prisma skills sync || exit 0"
   },
   "keywords": [],
@@ -21,6 +21,8 @@
     "cors": "^2.8.6",
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.23.1",
     "swagger-ui-express": "^5.0.1",

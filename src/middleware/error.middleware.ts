@@ -2,6 +2,19 @@ import { Request, Response, NextFunction } from "express";
 import { AppError } from "../utils/errors";
 import { Prisma } from "@prisma/client";
 
+export const redactSensitiveText = (value: string): string => {
+  if (/\b(?:credentials?|database\s+connection|connection\s+string)\b/i.test(value)) {
+    return "Sensitive error details redacted";
+  }
+  return value
+    .replace(/\b(postgres(?:ql)?:\/\/)[^\s"'`]+/gi, "$1[redacted]")
+    .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [redacted]")
+    .replace(/\b(authorization|password|jwt_secret|database_url|token)\b(\s*[:=]\s*|\s+)[^\s,;]+/gi, "$1$2[redacted]");
+};
+
+const useSafeErrorDetails = () =>
+  process.env.NODE_ENV === "production" || process.env.NODE_ENV === "test";
+
 export const errorHandler = (
   err: unknown,
   _req: Request,
@@ -12,7 +25,9 @@ export const errorHandler = (
   if (err instanceof AppError) {
     res.status(err.statusCode).json({
       success: false,
-      message: err.message,
+      message: err.statusCode >= 500 && useSafeErrorDetails()
+        ? "Internal server error"
+        : redactSensitiveText(err.message),
     });
     return;
   }
@@ -36,12 +51,17 @@ export const errorHandler = (
   }
 
   // 4. Unexpected server errors: Log safely without credentials/secrets
-  const errorMessage = err instanceof Error ? err.message : "Unknown error";
-  console.error(`[Internal Server Error]: ${errorMessage}`);
+  const errorMessage = err instanceof Error ? redactSensitiveText(err.message) : "Unknown error";
+  console.error(JSON.stringify({
+    level: "error",
+    event: "unhandled_request_error",
+    error: err instanceof Error ? err.name : "UnknownError",
+    ...(!useSafeErrorDetails() ? { message: errorMessage } : {}),
+  }));
 
-  // Never expose stack traces, database details, secrets, or internal error messages
+  // Never expose stack traces; production responses and logs omit internal messages.
   res.status(500).json({
     success: false,
-    message: "Internal server error",
+    message: useSafeErrorDetails() ? "Internal server error" : errorMessage,
   });
 };
